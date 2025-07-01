@@ -41,6 +41,10 @@ class ImprovedTouhouEnv:
         self.max_steps = 10000
         self.current_step = 0
         self.first_reset = True
+
+        # 射击控制
+        self.last_shoot_time = 0
+        self.shoot_interval = 0.02  # 20ms间隔超快速射击（50次/秒）
         
         # 动作映射：基本8方向移动
         self.action_map = {
@@ -97,8 +101,8 @@ class ImprovedTouhouEnv:
             time.sleep(0.5)
 
         print("游戏开始按键序列已执行完成")
-        # 默认一直按住Z键射击
-        keyboard.press('z')
+        # 开始快速射击模式
+        self.last_shoot_time = time.time()
 
     def _restart_game(self):
         """游戏结束后重新开始的按键流程示例"""
@@ -135,15 +139,15 @@ class ImprovedTouhouEnv:
             time.sleep(2)
 
             # 再按几次Z进入游戏
-            for i in range(5):
+            for i in range(6):
                 keyboard.press('z')
                 time.sleep(0.2)
                 keyboard.release('z')
                 print(f"按Z键 {i+1}/5")
                 time.sleep(0.5)
-            print("游戏重新开始完成，开始持续射击")
-            # 重新开始后也要按住Z键进行射击
-            keyboard.press('z')
+            print("游戏重新开始完成，开始快速射击")
+            # 重新开始后也要开始快速射击
+            self.last_shoot_time = time.time()
 
             return True
         except Exception as e:
@@ -153,8 +157,7 @@ class ImprovedTouhouEnv:
     def reset(self):
         """重置环境"""
         print("\n------ 重置游戏环境 ------")
-        # 释放按键
-        keyboard.release('z')
+        # 释放按键（不需要释放Z键，因为我们使用快速按键模式）
         for action_keys in self.action_map.values():
             for k in action_keys:
                 keyboard.release(k)
@@ -172,6 +175,9 @@ class ImprovedTouhouEnv:
         self.prev_player_pos = (0.5, 0.8)
         self.episode_max_score = 0
 
+        # 重置射击时间
+        self.last_shoot_time = 0
+
         # 首次reset vs 后续reset
         if self.first_reset:
             print("首次重置，启动游戏...")
@@ -180,6 +186,10 @@ class ImprovedTouhouEnv:
         else:
             print("再次重置，重启游戏...")
             self._restart_game()
+
+        # 等待1秒让游戏状态稳定，否则分数和生命会是0
+        print("等待游戏状态稳定...1s")
+        time.sleep(1)
 
         # 获取若干帧(初始化帧堆叠)
         print("获取初始游戏状态...")
@@ -195,7 +205,15 @@ class ImprovedTouhouEnv:
     def step(self, action):
         """执行动作并返回增强的状态和奖励"""
         self.current_step += 1
-        
+
+        # 快速射击逻辑
+        current_time = time.time()
+        if current_time - self.last_shoot_time >= self.shoot_interval:
+            keyboard.press('z')
+            time.sleep(0.01)  # 短暂按下
+            keyboard.release('z')
+            self.last_shoot_time = current_time
+
         # 执行动作
         for k in self.action_map[action]:
             keyboard.press(k)
@@ -266,7 +284,7 @@ class ImprovedTouhouEnv:
         if self.current_step % 200 == 0:
             try:
                 # 直接使用当前目录，因为我们已经在project_player目录中
-                debug_dir = f"debug_batch_{self.current_step // 1000}"
+                debug_dir = "debug"
                 if not os.path.exists(debug_dir):
                     os.makedirs(debug_dir)
                     print(f"创建调试目录: {debug_dir}")
@@ -512,8 +530,7 @@ class ImprovedTouhouEnv:
         # 关闭截屏
         if self.cap:
             self.cap.close()
-        # 释放键盘
-        keyboard.release('z')
+        # 释放键盘（不需要释放Z键，因为我们使用快速按键模式）
         for action_keys in self.action_map.values():
             for k in action_keys:
                 keyboard.release(k)
