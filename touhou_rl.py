@@ -238,6 +238,10 @@ class TouhouEnv:
         self.max_steps = 10000
         self.current_step = 0
         self.first_reset = True
+
+        # 射击控制
+        self.last_shoot_time = 0
+        self.shoot_interval = 0.02  # 20ms间隔超快速射击（50次/秒）
         
         # 炸弹系统 (暂时注释掉)
         # self.bombs = 3  # 初始炸弹数为3
@@ -305,8 +309,8 @@ class TouhouEnv:
             time.sleep(0.5)
 
         print("游戏开始按键序列已执行完成")
-        # 默认一直按住Z键射击
-        keyboard.press('z')
+        # 开始快速射击模式（不再按住Z键）
+        print("射击模式：快速连续按Z键")
 
     def _restart_game(self):
         """
@@ -352,9 +356,9 @@ class TouhouEnv:
                 keyboard.release('z')
                 print(f"按Z键 {i+1}/5")
                 time.sleep(0.5)
-            print("游戏重新开始完成，开始持续射击")
-            # 重新开始后也要按住Z键进行射击
-            keyboard.press('z')
+            print("游戏重新开始完成，开始快速射击")
+            # 重新开始后使用快速射击模式（不再按住Z键）
+            print("射击模式：快速连续按Z键")
 
             return True
         except Exception as e:
@@ -363,8 +367,7 @@ class TouhouEnv:
 
     def reset(self):
         print("\n------ 重置游戏环境 ------")
-        # 释放按键
-        keyboard.release('z')
+        # 释放按键（不需要释放Z键，因为我们使用快速按键模式）
         for action_keys in self.action_map.values():
             for k in action_keys:
                 keyboard.release(k)
@@ -376,6 +379,8 @@ class TouhouEnv:
         self.last_score = 0
         self.start_time = time.time()
         self.current_step = 0
+        # 重置射击时间
+        self.last_shoot_time = 0
         # 重置炸弹数 (注释掉)
         # self.bombs = self.initial_bombs
         # self.last_lives = 2  # 重置生命记录（东方游戏通常初始3条命）
@@ -389,6 +394,10 @@ class TouhouEnv:
         else:
             print("再次重置，重启游戏...")
             self._restart_game()
+
+        # 等待1秒让游戏状态稳定，否则分数和生命会是0
+        print("等待游戏状态稳定...1s")
+        time.sleep(1)
 
         # 获取若干帧(初始化帧堆叠)
         print("获取初始游戏状态...")
@@ -405,7 +414,14 @@ class TouhouEnv:
     def step(self, action):
         self.current_step += 1
         current_time = time.time()
-        
+
+        # 快速射击逻辑
+        if current_time - self.last_shoot_time >= self.shoot_interval:
+            keyboard.press('z')
+            time.sleep(0.01)  # 短暂按下
+            keyboard.release('z')
+            self.last_shoot_time = current_time
+
         # 检查炸弹动作是否可执行，并计算相应奖励 (注释掉炸弹逻辑)
         # bomb_penalty = 0
         # if action == 9:  # 炸弹动作
@@ -497,8 +513,7 @@ class TouhouEnv:
         # 关闭截屏
         if self.cap:
             self.cap.close()
-        # 释放键盘
-        keyboard.release('z')
+        # 释放键盘（不需要释放Z键，因为我们使用快速按键模式）
         for action_keys in self.action_map.values():
             for k in action_keys:
                 keyboard.release(k)
