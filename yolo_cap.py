@@ -15,6 +15,7 @@ import torch
 import time
 import os
 from pathlib import Path
+import pytesseract  # 添加OCR支持
 
 # 尝试导入YOLO，如果失败则提供降级方案
 try:
@@ -30,7 +31,7 @@ class YOLOGameCapture:
 
     def __init__(self,
                  window_name="搶曽峠杺嫿丂乣 the Embodiment of Scarlet Devil",
-                 model_path="runs/detect/touhou_feature_enhanced/weights/best.pt",
+                 model_path="runs/detect/touhou_feature_enhanced/weights/best.pt",  # 使用训练好的YOLO模型
                  fallback_to_color=True,
                  conf_threshold=0.25,
                  iou_threshold=0.7):
@@ -75,6 +76,9 @@ class YOLOGameCapture:
 
         # 初始化历史位置用于稳定性检查
         self.last_player_pos = None
+
+        # 设置Tesseract OCR路径
+        pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
         # 初始化YOLO模型
         self._initialize_yolo()
@@ -420,8 +424,83 @@ class YOLOGameCapture:
         return self.base_capture.capture_frame()
 
     def extract_status_info(self, status_img):
-        """代理到基础捕获类"""
-        return self.base_capture.extract_status_info(status_img)
+        """
+        给定状态栏图(高448,宽192)，在里面找 (score, lives)。
+        注意：不再检测炸弹数，炸弹数由内部计数管理。
+        """
+        try:
+            # ----------------
+            # 在状态栏图上精确定位你的 score 区域:
+            # 例如这里示例: score 大约在 (y1=30, y2=60, x1=20, x2=150)
+            score_box  = (60, 90,  10, 200)
+
+            # 生命星星(红色)
+            # 例如示例: (y1=100, y2=120, x1=50, x2=180)
+            player_box = (110, 130, 50, 180)
+            # ----------------
+
+            # 裁剪(注意status_img的 shape ~ (448,192,4))
+            def crop(box):
+                y1, y2, x1, x2 = box
+                return status_img[y1:y2, x1:x2]
+
+            score_roi  = crop(score_box)
+            player_roi = crop(player_box)
+
+            # Debug: 在一张拷贝图中画出矩形看看对不对
+            # debug_show = status_img.copy()
+            # cv2.rectangle(debug_show, (score_box[2],  score_box[0]),  (score_box[3],  score_box[1]),  (0,0,255),   2)
+            # cv2.rectangle(debug_show, (player_box[2], player_box[0]), (player_box[3], player_box[1]), (0,255,0),  2)
+            # # 你可在调试时打开:
+            # cv2.imshow("debug_status", debug_show)
+            # cv2.waitKey(1)
+
+            # OCR 解析分数
+            score_val = self._extract_score(score_roi)
+
+            # HSV 解析红星=生命
+            lives_val = self._count_stars(player_roi, color="red")
+
+            # 炸弹数不再通过OCR检测，直接返回0
+            bombs_val = 0
+
+            return score_val, lives_val, bombs_val
+
+        except Exception as e:
+            print(f"状态信息提取失败: {e}")
+            return 0, 0, 0
+
+    def _extract_score(self, roi_bgra):
+        """
+        OCR数字。先转灰度并二值化，然后只允许数字。
+        """
+        gray = cv2.cvtColor(roi_bgra, cv2.COLOR_BGRA2GRAY)
+        _, bin_ = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY)
+        txt = pytesseract.image_to_string(
+            bin_, config="--psm 7 -c tessedit_char_whitelist=0123456789"
+        )
+        try:
+            return int(txt.strip())
+        except ValueError:
+            return 0
+
+    def _count_stars(self, roi_bgra, color="red"):
+        """
+        基于HSV统计轮廓面积>20的块数，认为是星星数量。
+        red: (0~10) or (160~180)
+        green: 多种绿色范围
+        """
+        bgr = cv2.cvtColor(roi_bgra, cv2.COLOR_BGRA2BGR)
+        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+
+        if color == "red":
+            m1 = cv2.inRange(hsv, (0,   100, 100), (10,  255, 255))
+            m2 = cv2.inRange(hsv, (160, 100, 100), (180, 255, 255))
+            mask = cv2.bitwise_or(m1, m2)
+
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        count = sum(1 for c in cnts if cv2.contourArea(c) > 20)
+        return min(count, 5)  # 最多5颗星
 
     def close(self):
         """代理到基础捕获类"""
